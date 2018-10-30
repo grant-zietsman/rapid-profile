@@ -1,60 +1,161 @@
 #ifndef RAPID_PROFILE__HPP_
 #define RAPID_PROFILE__HPP_
 
-#include <list>
-#include <vector>
-#include <chrono>
-#include <iostream>
-#include <cstring>
-#include <csignal>
-#include <mutex>
+//----------------------------------------------------------------------------//
+// INCLUDES
+//----------------------------------------------------------------------------//
 
-#define NNN 32
-#define CHUNK_SIZE 1048576
+#include <cassert>
+#include <chrono>
+#include <csignal>
+#include <cstring>
+#include <iostream>
+#include <list>
+#include <mutex>
+#include <vector>
+
+//----------------------------------------------------------------------------//
+// SETTINGS
+//----------------------------------------------------------------------------//
+
+// Maximum size of the name and file strings
+#define RAPID_PROFILE_STR_SIZE 64
+
+// Maximum number of interval timers (including internal)
+#define RAPID_PROFILE_MAX_TIMERS 1024
+
+// Number of interval allocated per chunk
+#define RAPID_PROFILE_CHUNK_SIZE 1048576
+
+// Thread safety
+#define RAPID_PROFILE_THREAD_SAFE 1
+
+// Internal timers
+#define RAPID_PROFILE_INTERNAL 1
+
+//----------------------------------------------------------------------------//
+// NOW
+//----------------------------------------------------------------------------//
+
+#define RAPID_PROFILE_NOW() RapidProfile::type::clock::now()
+
+//----------------------------------------------------------------------------//
+// INIT
+//----------------------------------------------------------------------------//
+
+#define RAPID_PROFILE_INIT() RapidProfile::api<RAPID_PROFILE_STR_SIZE>::init()
+
+//----------------------------------------------------------------------------//
+// INTERVAL
+//----------------------------------------------------------------------------//
+
+#define RAPID_PROFILE_INTERVAL_ID(NAME) _rapid_profile_interval_##NAME##_id
+#define RAPID_PROFILE_INTERVAL_INST(NAME) _rapid_profile_interval_##NAME
+
+//----------------------------------------------------------------------------//
+
+#define INTERVAL(NAME)                                                                \
+    static RapidProfile::type::id RAPID_PROFILE_INTERVAL_ID(NAME) =                   \
+        RapidProfile::api<RAPID_PROFILE_STR_SIZE>::get_id(#NAME, __FILE__, __LINE__); \
+    RapidProfile::interval & RAPID_PROFILE_INTERVAL_INST(NAME) =                      \
+        RapidProfile::api<RAPID_PROFILE_STR_SIZE>::get_interval();                    \
+    RAPID_PROFILE_INTERVAL_INST(NAME).id    = RAPID_PROFILE_INTERVAL_ID(NAME);        \
+    RAPID_PROFILE_INTERVAL_INST(NAME).start = RAPID_PROFILE_NOW();
+
+//----------------------------------------------------------------------------//
+
+#define INTERVAL_END(NAME) RAPID_PROFILE_INTERVAL_INST(NAME).stop = RAPID_PROFILE_NOW();
+
+//----------------------------------------------------------------------------//
+
+#define INTERVAL_START(NAME) RAPID_PROFILE_INTERVAL_INST(NAME).start = RAPID_PROFILE_NOW();
+
+//----------------------------------------------------------------------------//
+// THREAD SAFETY
+//----------------------------------------------------------------------------//
+
+#if RAPID_PROFILE_THREAD_SAFE == 1
+
+#define RAPID_PROFILE_MUTEX(NAME) \
+    static std::mutex & NAME()    \
+    {                             \
+        static std::mutex NAME;   \
+        return NAME;              \
+    }
+
+#define RAPID_PROFILE_MUTEX_GUARD(NAME) std::lock_guard<std::mutex> guard(NAME());
+
+#else
+
+#define RAPID_PROFILE_MUTEX(NAME)
+#define RAPID_PROFILE_MUTEX_GUARD(NAME)
+
+#endif
+
+//----------------------------------------------------------------------------//
+// INTERNAL
+//----------------------------------------------------------------------------//
+
+#define RAPID_PROFILE_INIT_ID 0
+#define RAPID_PROFILE_RECHUNK_ID 1
+
+//----------------------------------------------------------------------------//
 
 namespace RapidProfile
 {
+//----------------------------------------------------------------------------//
+// Types
+//----------------------------------------------------------------------------//
 
 namespace type
 {
-typedef unsigned int id;
-typedef float time;
-// typedef float duration;
-typedef std::chrono::steady_clock clock;
-typedef clock::time_point time_point;
-typedef clock::duration duration;
+typedef unsigned int                id;
+typedef float                       time;
+typedef std::chrono::steady_clock   clock;
+typedef std::chrono::duration<time> duration;
+typedef clock::time_point           time_point;
 
-} // namespace type
+}  // namespace type
+
+//----------------------------------------------------------------------------//
+// Interval
+//----------------------------------------------------------------------------//
 
 struct interval
 {
     interval()
     {
     }
-    interval(const type::id id) : id(id), start(type::clock::now())
+    interval(const type::id id) : id(id), start(RAPID_PROFILE_NOW())
     {
     }
     type::time duration() const
     {
-        return std::chrono::duration<type::time>(stop - start).count();
+        return type::duration(stop - start).count();
     }
-    type::id id;
+    type::id         id;
     type::time_point start;
     type::time_point stop;
 
     template <size_t N>
-    struct info
+    struct tag
     {
         char name[N];
         char file[N];
-        int line;
+        int  line;
     };
 };
+
+//----------------------------------------------------------------------------//
+// Chunker
+//----------------------------------------------------------------------------//
 
 template <class T>
 class chunker
 {
   public:
+    //------------------------------------------------------------------------//
+
     chunker(size_t chunk_size) : chunk_size_(chunk_size), chunk_(NULL)
     {
         chunk_ = new std::vector<T>();
@@ -64,149 +165,207 @@ class chunker
         rechunk();
     }
 
+    //------------------------------------------------------------------------//
+
     ~chunker()
     {
-        for (typename std::list<std::vector<T> *>::iterator it = chunks_.begin(); it != chunks_.end(); it++)
-            delete *it;
+        for (typename std::list<std::vector<T> *>::iterator it = chunks_.begin(); it != chunks_.end(); it++) delete *it;
         chunks_.clear();
     }
 
-    T &push_back(T const &item = T())
+    //------------------------------------------------------------------------//
+
+    T & push_back(T const & item = T())
     {
-        if (chunk_->size() == chunk_size_)
-            rechunk();
+        if (chunk_->size() + 1 == chunk_size_) rechunk();
 
         chunk_->push_back(item);
         return chunk_->back();
     }
 
-    std::list<std::vector<T> *> &chunks()
+    //------------------------------------------------------------------------//
+
+    std::list<std::vector<T> *> & chunks()
     {
         return chunks_;
     }
 
+    //------------------------------------------------------------------------//
+
   protected:
+    //------------------------------------------------------------------------//
+
     void rechunk()
     {
+#if RAPID_PROFILE_INTERNAL == 1
+        interval rechunk_interval(RAPID_PROFILE_RECHUNK_ID);
+#endif
+
+        std::vector<T> * prev_chunk = chunk_;
+
         chunk_ = chunks_.back();
 
-        std::vector<T> *next = new std::vector<T>();
+        std::vector<T> * next = new std::vector<T>();
         next->reserve(chunk_size_);
         chunks_.push_back(next);
+
+#if RAPID_PROFILE_INTERNAL == 1
+        rechunk_interval.stop = RAPID_PROFILE_NOW();
+        prev_chunk->push_back(rechunk_interval);
+#endif
     }
 
+    //------------------------------------------------------------------------//
+
   private:
-    size_t chunk_size_;
-    std::vector<T> *chunk_;
+    size_t                      chunk_size_;
+    std::vector<T> *            chunk_;
     std::list<std::vector<T> *> chunks_;
 };
+
+//----------------------------------------------------------------------------//
+// API
+//----------------------------------------------------------------------------//
 
 template <size_t N>
 class api
 {
   public:
+    //------------------------------------------------------------------------//
+
     static void init()
     {
-        interval_info();
-        interval_info().reserve(1000);
-        since_start();
+#if RAPID_PROFILE_INTERNAL == 1
+        RapidProfile::type::time_point const & start = start_time();
+#else
+        start_time();
+#endif
+
+        tags().reserve(RAPID_PROFILE_MAX_TIMERS);
+
+#if RAPID_PROFILE_INTERNAL == 1
+        assert(RAPID_PROFILE_INIT_ID == get_id("RAPID_PROFILE_INIT", __FILE__, __LINE__));
+        assert(RAPID_PROFILE_RECHUNK_ID == get_id("RAPID_PROFILE_RECHUNK", __FILE__, __LINE__));
+
+        interval & startup_interval = get_interval();
+        startup_interval.id         = RAPID_PROFILE_INIT_ID;
+        startup_interval.start      = start;
+#endif
+
         std::atexit(api::exit);
         ::signal(SIGINT, api::signal);
+
+#if RAPID_PROFILE_INTERNAL == 1
+        startup_interval.stop = RAPID_PROFILE_NOW();
+#endif
     }
+
+    //------------------------------------------------------------------------//
+
+    static interval & get_interval()
+    {
+        RAPID_PROFILE_MUTEX_GUARD(interval_mutex);
+
+        return intervals().push_back();
+    }
+
+    //------------------------------------------------------------------------//
+
+    static type::id get_id(const char * name, const char * file, int line)
+    {
+        static type::id id = 0;
+
+        RAPID_PROFILE_MUTEX_GUARD(tag_mutex);
+
+        tags().push_back(interval::tag<N>());
+        interval::tag<N> & tag = tags().back();
+
+        strncpy(tag.name, name, N);
+        tag.name[N - 1] = '\0';
+
+        strncpy(tag.file, file, N);
+        tag.file[N - 1] = '\0';
+
+        tag.line = line;
+
+        return id++;
+    }
+
+    //------------------------------------------------------------------------//
+
+  private:
+    //------------------------------------------------------------------------//
 
     static void exit()
     {
         log();
     }
 
-    static void signal(int signum) {
-        ::exit(signum);     
+    //------------------------------------------------------------------------//
+
+    static void signal(int signum)
+    {
+        ::exit(signum);
     }
 
-    static interval &get_interval()
+    //------------------------------------------------------------------------//
+
+    static type::time relative(type::time_point const & stop  = type::clock::now(),
+                               type::time_point const & start = start_time())
     {
-        std::lock_guard<std::mutex> guard(mutex());
-        return intervals().push_back();
+        return type::duration(stop - start).count();
     }
 
-    static type::id get_id(const char *name, const char *file, int line)
-    {
-        static type::id id = 0;
-        std::lock_guard<std::mutex> guard(mutex());
-        interval::info<N> info_;
-        interval_info().push_back(info_);
-        interval::info<N> &info = interval_info().back();
-        strncpy(info.name, name, N);
-        info.name[N - 1] = '\0';
-        strncpy(info.file, file, N);
-        info.file[N - 1] = '\0';
-        info.line = line;
-        return id++;
-    }
-
-    static type::time relative(type::time_point const &start, type::time_point const &stop = type::clock::now())
-    {
-        return std::chrono::duration<type::time>(stop - start).count();
-    }
-
-    static type::time since_start(type::time_point const &time = type::clock::now())
-    {
-        static type::time_point start_time = type::clock::now();
-        return std::chrono::duration<type::time>(time - start_time).count();
-    }
+    //------------------------------------------------------------------------//
 
     static void log()
     {
-        std::list<std::vector<interval> *> &chunks = intervals().chunks();
+        std::list<std::vector<interval> *> & chunks = intervals().chunks();
         for (std::list<std::vector<interval> *>::iterator it = chunks.begin(); it != chunks.end(); it++)
         {
             for (std::vector<interval>::iterator vit = (*it)->begin(); vit != (*it)->end(); vit++)
             {
-                std::cout << interval_info()[vit->id].name << " @ (" << interval_info()[vit->id].file << ":" << interval_info()[vit->id].line << ") " << relative(vit->start, vit->stop) * 1e6 << " us " << std::endl;
+                std::cout << tags()[vit->id].name << " @ (" << tags()[vit->id].file << ":" << tags()[vit->id].line
+                          << ") " << relative(vit->stop, vit->start) * 1e6 << " us " << std::endl;
             }
         }
     }
 
   private:
-    static std::mutex & mutex()
+    //------------------------------------------------------------------------//
+
+    RAPID_PROFILE_MUTEX(interval_mutex);
+    RAPID_PROFILE_MUTEX(tag_mutex);
+
+    //------------------------------------------------------------------------//
+
+    static type::time_point const & start_time()
     {
-        static std::mutex mutex;
-        return mutex;
+        static type::time_point start_time = RAPID_PROFILE_NOW();
+        return start_time;
     }
 
-    static std::vector<interval::info<N>> &interval_info()
+    //------------------------------------------------------------------------//
+
+    static std::vector<interval::tag<N> > & tags()
     {
-        static std::vector<interval::info<N>> interval_info;
-        return interval_info;
+        static std::vector<interval::tag<N> > tags;
+        return tags;
     }
 
-    static chunker<interval> &intervals()
+    //------------------------------------------------------------------------//
+
+    static chunker<interval> & intervals()
     {
-        static chunker<interval> *intervals = new chunker<interval>(CHUNK_SIZE);
+        static chunker<interval> * intervals = new chunker<interval>(RAPID_PROFILE_CHUNK_SIZE);
         return *intervals;
     }
+
+    //------------------------------------------------------------------------//
 };
 
-#define RAPID_PROFILE_INIT() \
-    RapidProfile::api<NNN>::init()
+//----------------------------------------------------------------------------//
 
-#define INTERVAL_ID(NAME) _rapid_profile_interval_##NAME##_id
-#define INTERVAL_INST(NAME) _rapid_profile_interval_##NAME
-
-#define INTERVAL(NAME)                                                                                           \
-    static RapidProfile::type::id INTERVAL_ID(NAME) = RapidProfile::api<NNN>::get_id(#NAME, __FILE__, __LINE__); \
-    RapidProfile::interval &INTERVAL_INST(NAME) = RapidProfile::api<NNN>::get_interval();                        \
-    INTERVAL_INST(NAME).id = INTERVAL_ID(NAME);                                                                  \
-    INTERVAL_INST(NAME).start = RapidProfile::type::clock::now();
-    // std::cout << "start " << #NAME << std::endl;
-
-#define INTERVAL_END(NAME) \
-    INTERVAL_INST(NAME).stop = RapidProfile::type::clock::now();
-    // std::cout << "stop " << #NAME << std::endl;
-
-#define INTERVAL_START(NAME) \
-    INTERVAL_INST(NAME).start = RapidProfile::type::clock::now();
-
-}; // namespace RapidProfile
+};  // namespace RapidProfile
 
 #endif
