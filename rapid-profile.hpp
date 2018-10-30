@@ -10,6 +10,7 @@
 #include <csignal>
 #include <cstring>
 #include <iostream>
+#include <fstream>
 #include <list>
 #include <mutex>
 #include <vector>
@@ -318,17 +319,44 @@ class api
 
     //------------------------------------------------------------------------//
 
+    // static void log()
+    // {
+    //     std::list<std::vector<interval> *> & chunks = intervals().chunks();
+    //     for (std::list<std::vector<interval> *>::iterator it = chunks.begin(); it != chunks.end(); it++)
+    //     {
+    //         for (std::vector<interval>::iterator vit = (*it)->begin(); vit != (*it)->end(); vit++)
+    //         {
+    //             std::cout << tags()[vit->id].name << " @ (" << tags()[vit->id].file << ":" << tags()[vit->id].line
+    //                       << ") " << relative(vit->stop, vit->start) * 1e6 << " us " << std::endl;
+    //         }
+    //     }
+    // }
+
     static void log()
     {
+        std::ofstream file;
+        
+        std::vector<interval::tag<N> > & tags = api::tags();
         std::list<std::vector<interval> *> & chunks = intervals().chunks();
+
+        file.open("tags.rp.csv");
+        file << "id,name,file,line" << std::endl;
+        for (typename std::vector<interval::tag<N> >::iterator it = tags.begin(); it != tags.end(); it++)
+        {
+            file << (it - tags.begin()) << ',' << it->name << ',' << it->file << ',' << it->line << std::endl;
+        }
+        file.close();
+        
+        file.open("intervals.rp.csv");
+        file << "id,start,stop,duration" << std::endl;
         for (std::list<std::vector<interval> *>::iterator it = chunks.begin(); it != chunks.end(); it++)
         {
             for (std::vector<interval>::iterator vit = (*it)->begin(); vit != (*it)->end(); vit++)
             {
-                std::cout << tags()[vit->id].name << " @ (" << tags()[vit->id].file << ":" << tags()[vit->id].line
-                          << ") " << relative(vit->stop, vit->start) * 1e6 << " us " << std::endl;
+                file << vit->id << ',' << relative(vit->start) * 1e6 << ',' << relative(vit->stop) * 1e6 << ',' << relative(vit->stop, vit->start) * 1e6 << std::endl;
             }
         }
+        file.close();
     }
 
   private:
