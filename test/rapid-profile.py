@@ -36,14 +36,15 @@ class Tag:
         self.file = ""
         self.line = 0
 
-import csv
+def csv(file, delimeter=','):
+    return [line.strip().split(delimeter) for line in file]
 
 def get_statistic(id):
     statistic = Statistic()
     durations = []
     with open('intervals.rp.csv', 'r') as fintervals:
         fintervals.readline()
-        for row in csv.reader(fintervals, delimiter=','):
+        for row in csv(fintervals):
             if id == row[0]:
                 duration = float(row[3])
                 statistic.sample(duration)
@@ -54,7 +55,7 @@ def get_statistics():
     statistics = {}
     with open('intervals.rp.csv', 'r') as fintervals:
         fintervals.readline()
-        for row in csv.reader(fintervals, delimiter=','):
+        for row in csv(fintervals):
             id = row[0]
             if id not in statistics:
                 statistics[id] = Statistic()
@@ -68,7 +69,7 @@ def get_tags():
     tags = {}
     with open('tags.rp.csv', 'r') as ftags:
         ftags.readline()
-        for row in csv.reader(ftags, delimiter=','):
+        for row in csv(ftags):
             id = row[0]
             if id not in tags:
                 tags[id] = Tag()
@@ -107,15 +108,36 @@ def interval(id):
         print("%.2f" % (duration))
     print()
 
-import argparse
 
-parser = argparse.ArgumentParser(description='Rapid profile analyzer.')
-parser.add_argument('--id', '-i', type=int, help='interval ID to query', default=None)
-args = parser.parse_args()
+try:
+    import argparse
 
-if args.id is None:
-    overview()
-else:
-    interval(args.id)
+    parser = argparse.ArgumentParser(description='Rapid profile analyzer.')
+    parser.add_argument('--id', '-i', type=int, help='interval ID to query', default=None)
+    args = parser.parse_args()
+
+    if args.id is None:
+        overview()
+    else:
+        interval(args.id)
+except:
+    print('FALLBACK MODE\n')
+    import sys
+    if (len(sys.argv) > 1):
+        key = sys.argv[1]
+        if key == '-i':
+            if len(sys.argv) > 2:
+                id = sys.argv[2]
+                interval(id)
+            else:
+                print('-i required ID argument')
+        else:
+            try:
+                id = sys.argv[1]
+                interval(id)
+            except:
+                print('unrecognized argument argument')            
+    else:
+        overview()
 
 
