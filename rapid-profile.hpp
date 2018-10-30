@@ -9,8 +9,8 @@
 #include <chrono>
 #include <csignal>
 #include <cstring>
-#include <iostream>
 #include <fstream>
+#include <iostream>
 #include <list>
 #include <mutex>
 #include <vector>
@@ -18,6 +18,9 @@
 //----------------------------------------------------------------------------//
 // SETTINGS
 //----------------------------------------------------------------------------//
+
+// Define to disable rapid profile
+// #define RAPID_PROFILE_DSIABLE
 
 // Maximum size of the name and file strings
 #define RAPID_PROFILE_STR_SIZE 64
@@ -38,23 +41,39 @@
 // NOW
 //----------------------------------------------------------------------------//
 
+#ifdef RAPID_PROFILE_DISABLE
+#define RAPID_PROFILE_NOW()
+#else
 #define RAPID_PROFILE_NOW() RapidProfile::type::clock::now()
+#endif
 
 //----------------------------------------------------------------------------//
 // INIT
 //----------------------------------------------------------------------------//
 
+#ifdef RAPID_PROFILE_DISABLE
+#define RAPID_PROFILE_INIT()
+#else
 #define RAPID_PROFILE_INIT() RapidProfile::api<RAPID_PROFILE_STR_SIZE>::init()
+#endif
 
 //----------------------------------------------------------------------------//
 // INTERVAL
 //----------------------------------------------------------------------------//
 
+#ifdef RAPID_PROFILE_DISABLE
+#define RAPID_PROFILE_INTERVAL_ID(NAME)
+#define RAPID_PROFILE_INTERVAL_INST(NAME)
+#else
 #define RAPID_PROFILE_INTERVAL_ID(NAME) _rapid_profile_interval_##NAME##_id
 #define RAPID_PROFILE_INTERVAL_INST(NAME) _rapid_profile_interval_##NAME
+#endif
 
 //----------------------------------------------------------------------------//
 
+#ifdef RAPID_PROFILE_DISABLE
+#define INTERVAL(NAME)
+#else
 #define INTERVAL(NAME)                                                                \
     static RapidProfile::type::id RAPID_PROFILE_INTERVAL_ID(NAME) =                   \
         RapidProfile::api<RAPID_PROFILE_STR_SIZE>::get_id(#NAME, __FILE__, __LINE__); \
@@ -62,14 +81,23 @@
         RapidProfile::api<RAPID_PROFILE_STR_SIZE>::get_interval();                    \
     RAPID_PROFILE_INTERVAL_INST(NAME).id    = RAPID_PROFILE_INTERVAL_ID(NAME);        \
     RAPID_PROFILE_INTERVAL_INST(NAME).start = RAPID_PROFILE_NOW();
+#endif
 
 //----------------------------------------------------------------------------//
 
+#ifdef RAPID_PROFILE_DISABLE
+#define INTERVAL_END(NAME)
+#else
 #define INTERVAL_END(NAME) RAPID_PROFILE_INTERVAL_INST(NAME).stop = RAPID_PROFILE_NOW();
+#endif
 
 //----------------------------------------------------------------------------//
 
+#ifdef RAPID_PROFILE_DISABLE
+#define INTERVAL_START(NAME)
+#else
 #define INTERVAL_START(NAME) RAPID_PROFILE_INTERVAL_INST(NAME).start = RAPID_PROFILE_NOW();
+#endif
 
 //----------------------------------------------------------------------------//
 // THREAD SAFETY
@@ -319,24 +347,11 @@ class api
 
     //------------------------------------------------------------------------//
 
-    // static void log()
-    // {
-    //     std::list<std::vector<interval> *> & chunks = intervals().chunks();
-    //     for (std::list<std::vector<interval> *>::iterator it = chunks.begin(); it != chunks.end(); it++)
-    //     {
-    //         for (std::vector<interval>::iterator vit = (*it)->begin(); vit != (*it)->end(); vit++)
-    //         {
-    //             std::cout << tags()[vit->id].name << " @ (" << tags()[vit->id].file << ":" << tags()[vit->id].line
-    //                       << ") " << relative(vit->stop, vit->start) * 1e6 << " us " << std::endl;
-    //         }
-    //     }
-    // }
-
     static void log()
     {
         std::ofstream file;
-        
-        std::vector<interval::tag<N> > & tags = api::tags();
+
+        std::vector<interval::tag<N> > &     tags   = api::tags();
         std::list<std::vector<interval> *> & chunks = intervals().chunks();
 
         file.open("tags.rp.csv");
@@ -346,14 +361,15 @@ class api
             file << (it - tags.begin()) << ',' << it->name << ',' << it->file << ',' << it->line << std::endl;
         }
         file.close();
-        
+
         file.open("intervals.rp.csv");
         file << "id,start,stop,duration" << std::endl;
         for (std::list<std::vector<interval> *>::iterator it = chunks.begin(); it != chunks.end(); it++)
         {
             for (std::vector<interval>::iterator vit = (*it)->begin(); vit != (*it)->end(); vit++)
             {
-                file << vit->id << ',' << relative(vit->start) * 1e6 << ',' << relative(vit->stop) * 1e6 << ',' << relative(vit->stop, vit->start) * 1e6 << std::endl;
+                file << vit->id << ',' << relative(vit->start) * 1e6 << ',' << relative(vit->stop) * 1e6 << ','
+                     << relative(vit->stop, vit->start) * 1e6 << std::endl;
             }
         }
         file.close();
