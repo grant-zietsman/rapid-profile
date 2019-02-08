@@ -36,5 +36,4 @@
 
 # test
 test/test
-test/Makefile
 test/*.rp.csv
