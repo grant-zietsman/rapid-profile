@@ -1,4 +1,4 @@
-# Rapid Profile
+# C++ Rapid Profile
 
 Minimalistic, header only, cpp/c++ execution profiler.
 
