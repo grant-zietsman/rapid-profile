@@ -1,6 +1,6 @@
 # C++ Rapid Profile
 
-Minimalistic, header only, cpp/c++ execution profiler.
+Minimalistic, header only, Cpp/C++ execution profiler (C++11).
 
 ## Getting Started
 
